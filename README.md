@@ -26,3 +26,11 @@ window.setSceneParams({
   pixelSize: 6,
 });
 ```
+## Cosa cambia
+- Aggiorna README con il prossimo step operativo.
+
+## Perché
+- Rendere il flusso di apprendimento più chiaro e progressivo.
+
+## Come testare
+- Aprire README e verificare la nuova sezione.
