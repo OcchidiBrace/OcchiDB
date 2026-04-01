@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OcchiDB — Pixel Rainbow City</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        padding: 24px;
+        display: grid;
+        gap: 16px;
+        justify-content: center;
+        align-content: center;
+        background: radial-gradient(circle at top, #243b70, #060b1a 65%);
+        font-family: "Press Start 2P", "Courier New", monospace;
+        color: #e5eeff;
+      }
+      .scene-wrap { text-align: center; }
+      canvas.frame {
+        border: 4px solid #f0f4ff;
+        box-shadow: 0 0 0 4px #2f3f60, 0 0 30px rgba(0,0,0,.45);
+        image-rendering: pixelated;
+      }
+      .panel {
+        border: 2px solid #8ea4d8;
+        background: rgba(9, 15, 33, 0.85);
+        padding: 12px;
+        display: grid;
+        gap: 10px;
+        max-width: 720px;
+      }
+      .panel h2 { margin: 0 0 6px; font-size: .85rem; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 14px; }
+      label { font-size: .58rem; display: grid; gap: 6px; }
+      input[type="range"], input[type="color"] { width: 100%; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; }
+      button {
+        font-family: inherit;
+        font-size: .58rem;
+        color: #102044;
+        background: #c9dcff;
+        border: 2px solid #f5f9ff;
+        padding: 8px 10px;
+        cursor: pointer;
+      }
+      code { background: rgba(255,255,255,.15); padding: 2px 4px; }
+      .hint { font-size: .56rem; line-height: 1.7; margin: 4px 0 0; }
+    </style>
+  </head>
+  <body>
+    <div class="scene-wrap">
+      <canvas id="scene" class="frame" width="512" height="320" aria-label="Scorcio cittadino pixel art con arcobaleno animato"></canvas>
+      <p class="hint">Puoi usare il pannello sotto o <code>window.setSceneParams({...})</code>.</p>
+    </div>
+
+    <section class="panel" aria-label="Controlli scena">
+      <h2>Parametri (imparare facendo)</h2>
+      <div class="grid">
+        <label>Dimensione pixel: <span id="pixelOut"></span>
+          <input id="pixelSize" type="range" min="2" max="10" step="1" value="4" />
+        </label>
+        <label>Arcobaleno visibile (ms): <span id="visibleOut"></span>
+          <input id="rainbowVisibleMs" type="range" min="300" max="7000" step="100" value="3200" />
+        </label>
+        <label>Arcobaleno nascosto (ms): <span id="hiddenOut"></span>
+          <input id="rainbowHiddenMs" type="range" min="200" max="5000" step="100" value="1800" />
+        </label>
+        <label>Velocità colore: <span id="speedOut"></span>
+          <input id="rainbowHueSpeed" type="range" min="0.005" max="0.15" step="0.005" value="0.045" />
+        </label>
+        <label>Colore cielo alto
+          <input id="skyTop" type="color" value="#7297ff" />
+        </label>
+        <label>Colore cielo basso
+          <input id="skyBottom" type="color" value="#1d2f68" />
+        </label>
+      </div>
+      <div class="row">
+        <button id="presetSoft">Preset Morbido</button>
+        <button id="presetNeon">Preset Neon</button>
+        <button id="presetStorm">Preset Tempesta</button>
+      </div>
+    </section>
+
+    <script>
+      const canvas = document.getElementById("scene");
+      const ctx = canvas.getContext("2d");
+
+      const controls = {
+        pixelSize: document.getElementById("pixelSize"),
+        rainbowVisibleMs: document.getElementById("rainbowVisibleMs"),
+        rainbowHiddenMs: document.getElementById("rainbowHiddenMs"),
+        rainbowHueSpeed: document.getElementById("rainbowHueSpeed"),
+        skyTop: document.getElementById("skyTop"),
+        skyBottom: document.getElementById("skyBottom"),
+      };
+
+      const outputs = {
+        pixelSize: document.getElementById("pixelOut"),
+        rainbowVisibleMs: document.getElementById("visibleOut"),
+        rainbowHiddenMs: document.getElementById("hiddenOut"),
+        rainbowHueSpeed: document.getElementById("speedOut"),
+      };
+
+      const state = {
+        params: {
+          pixelSize: 4,
+          rainbowVisibleMs: 3200,
+          rainbowHiddenMs: 1800,
+          rainbowHueSpeed: 0.045,
+          skyTop: "#7297ff",
+          skyBottom: "#1d2f68",
+          stars: 40,
+        },
+        rainbow: { visible: true, timer: 0, hueShift: 0 },
+      };
+
+      const buildings = [
+        { x: 0, w: 64, h: 120, color: "#263859" },
+        { x: 70, w: 54, h: 88, color: "#2a3f66" },
+        { x: 130, w: 78, h: 138, color: "#1e304f" },
+        { x: 214, w: 60, h: 102, color: "#324d7b" },
+        { x: 280, w: 86, h: 152, color: "#25385a" },
+        { x: 372, w: 70, h: 118, color: "#2c4570" },
+        { x: 448, w: 64, h: 98, color: "#223656" },
+      ];
+
+      const stars = Array.from({ length: state.params.stars }, () => ({
+        x: Math.floor(Math.random() * canvas.width),
+        y: Math.floor(Math.random() * (canvas.height * 0.45)),
+        b: Math.random() * 0.8 + 0.2,
+      }));
+
+      function drawPixelRect(x, y, w, h, color) {
+        const p = state.params.pixelSize;
+        ctx.fillStyle = color;
+        ctx.fillRect(Math.round(x / p) * p, Math.round(y / p) * p, Math.round(w / p) * p, Math.round(h / p) * p);
+      }
+
+      function drawSky() {
+        const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        gradient.addColorStop(0, state.params.skyTop);
+        gradient.addColorStop(1, state.params.skyBottom);
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        for (const star of stars) {
+          const twinkle = 0.55 + Math.sin(performance.now() * 0.002 + star.x) * 0.45;
+          drawPixelRect(star.x, star.y, 4, 4, `rgba(255,255,220,${Math.min(1, star.b * twinkle)})`);
+        }
+      }
+
+      function drawBuildings() {
+        const baseY = canvas.height - 70;
+        for (const b of buildings) {
+          drawPixelRect(b.x, baseY - b.h, b.w, b.h, b.color);
+          for (let wy = baseY - b.h + 10; wy < baseY - 8; wy += 14) {
+            for (let wx = b.x + 8; wx < b.x + b.w - 8; wx += 14) {
+              const lit = ((wx + wy) % 28 === 0) || Math.random() > 0.75;
+              drawPixelRect(wx, wy, 6, 8, lit ? "#ffdf78" : "#14233d");
+            }
+          }
+        }
+        drawPixelRect(0, baseY, canvas.width, 70, "#1a253d");
+        drawPixelRect(0, baseY + 22, canvas.width, 8, "#586f97");
+      }
+
+      function drawRainbow(delta) {
+        const rainbow = state.rainbow;
+        rainbow.timer += delta;
+
+        if (rainbow.visible && rainbow.timer >= state.params.rainbowVisibleMs) {
+          rainbow.visible = false;
+          rainbow.timer = 0;
+        } else if (!rainbow.visible && rainbow.timer >= state.params.rainbowHiddenMs) {
+          rainbow.visible = true;
+          rainbow.timer = 0;
+        }
+        if (!rainbow.visible) return;
+
+        rainbow.hueShift = (rainbow.hueShift + state.params.rainbowHueSpeed * delta) % 360;
+        const centerX = canvas.width * 0.5;
+        const centerY = canvas.height * 0.78;
+
+        for (let i = 0; i < 7; i++) {
+          const hue = (rainbow.hueShift + i * 34) % 360;
+          ctx.beginPath();
+          ctx.strokeStyle = `hsl(${hue} 100% 62%)`;
+          ctx.lineWidth = 8;
+          ctx.arc(centerX, centerY, 170 - i * 12, Math.PI, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+
+      function syncOutputs() {
+        outputs.pixelSize.textContent = state.params.pixelSize;
+        outputs.rainbowVisibleMs.textContent = state.params.rainbowVisibleMs;
+        outputs.rainbowHiddenMs.textContent = state.params.rainbowHiddenMs;
+        outputs.rainbowHueSpeed.textContent = state.params.rainbowHueSpeed.toFixed(3);
+      }
+
+      function syncInputs() {
+        Object.keys(controls).forEach((key) => {
+          controls[key].value = state.params[key];
+        });
+        syncOutputs();
+      }
+
+      window.setSceneParams = function setSceneParams(nextParams = {}) {
+        state.params = { ...state.params, ...nextParams };
+        syncInputs();
+      };
+
+      Object.entries(controls).forEach(([key, el]) => {
+        el.addEventListener("input", () => {
+          const value = el.type === "range" ? Number(el.value) : el.value;
+          window.setSceneParams({ [key]: value });
+        });
+      });
+
+      document.getElementById("presetSoft").addEventListener("click", () => {
+        window.setSceneParams({
+          pixelSize: 4,
+          rainbowVisibleMs: 3800,
+          rainbowHiddenMs: 1200,
+          rainbowHueSpeed: 0.03,
+          skyTop: "#93b4ff",
+          skyBottom: "#273b76",
+        });
+      });
+
+      document.getElementById("presetNeon").addEventListener("click", () => {
+        window.setSceneParams({
+          pixelSize: 3,
+          rainbowVisibleMs: 2600,
+          rainbowHiddenMs: 700,
+          rainbowHueSpeed: 0.09,
+          skyTop: "#6d79ff",
+          skyBottom: "#11194d",
+        });
+      });
+
+      document.getElementById("presetStorm").addEventListener("click", () => {
+        window.setSceneParams({
+          pixelSize: 6,
+          rainbowVisibleMs: 1000,
+          rainbowHiddenMs: 2600,
+          rainbowHueSpeed: 0.02,
+          skyTop: "#8f98ab",
+          skyBottom: "#2a3242",
+        });
+      });
+
+      let last = performance.now();
+      function frame(now) {
+        const delta = now - last;
+        last = now;
+        drawSky();
+        drawRainbow(delta);
+        drawBuildings();
+        requestAnimationFrame(frame);
+      }
+
+      syncInputs();
+      requestAnimationFrame(frame);
+    </script>
+  </body>
+</html>
